@@ -9,7 +9,7 @@ from tqdm import tqdm
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, Dataset, random_split
-from torch.utils.tensorboard import SUmmaryWriter
+from torch.utils.tensorboard import SummaryWriter
 
 #设置随机种子
 def same_seed(seed):
@@ -25,7 +25,7 @@ def same_seed(seed):
 
 ##划分数据集train vali test
 def train_vail_split(data_set,valid_ratio,seed):
-    valid_dara_size = len(data_set)*valid_ratio
+    valid_dara_size = int(len(data_set)*valid_ratio)
     train_data_size = len(data_set) - valid_dara_size
     trian_data,valid_data = random_split(data_set,
                                          lengths=[train_data_size,valid_dara_size],
@@ -44,7 +44,7 @@ def select_feet(train_data,valid_data,test_data,select_all = True):
 
     raw_x_test = test_data
     if select_all:
-        feat_id = list(range(raw_x_train.shape(1)))#fature 117
+        feat_id = list(range(raw_x_train.shape[1]))#fature 117
     else:
         feat_id = [0,1,2,3]
     return raw_x_train[:,feat_id], raw_x_valid[:,feat_id],raw_x_test[:,feat_id],y_train,y_valid
@@ -54,20 +54,19 @@ def select_feet(train_data,valid_data,test_data,select_all = True):
 #数据集
 class COVID19Dataset(Dataset):
     def __init__(self,feature,targets = None):
-        super().__init__()#构造函数
         if targets is None:
             self.targets = targets
         else:
             self.targets = torch.FloatTensor(targets)#标签
         self.features = torch.FloatTensor(feature)#特征张量
-        def __getitem__(self,idx):
-            if self.targets is None:#做预测
-                return self.features[idx]
-            else:#训练
-                return self.feature[idx],self.targets[idx]
-        def __len__(self):
-            ##返回数据集长度
-            return len (self.features)#h行数
+    def __getitem__(self,idx):
+        if self.targets is None:#做预测
+            return self.features[idx]
+        else:#训练
+            return self.features[idx],self.targets[idx]
+    def __len__(self):
+        ##返回数据集长度
+        return len (self.features)#h行数
 
 
 #module
@@ -81,13 +80,14 @@ class My_Module(nn.Module):
             nn.ReLU(),
             nn.Linear(8,1),
         )
-    def foward(self,x):
+    def forward(self,x):
         x = self.layers(x)
         x = x.squeeze(1)
         return x
 
 ##参数设置
-device = 'cuda' if torch.is_available() else 'cpu'
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print(f'Using device: {device}')
 #字典
 config = {
     'seed':1122408,
@@ -97,16 +97,16 @@ config = {
     'batch_size':256,
     'lr': 1e-5,
     'early_stop': 300,
-    'save_path': '/covid'
+    'save_path': '/home/panjunzhong/MLlearn/p1/models/model.ckpt'
 }
 
 
 def trainer(train_loader,valid_loader,config, device,model):
     criterion = nn.MSELoss(reduction= 'mean')
-    optimizer = torch.optim.sgd(model.parameters(),lr = config['lr'],momentum = 0.9)
-    writer = SUmmaryWriter()
-    if not os.path.isabs('./models'):
-        os.mkdir('./models')
+    optimizer = torch.optim.SGD(model.parameters(),lr = config['lr'],momentum = 0.9)
+    writer = SummaryWriter()
+    if not os.path.isabs('/home/panjunzhong/MLlearn/models'):
+        os.mkdir('/home/panjunzhong/MLlearn/models')
     n_epochs = config['n_epochs']
     best_loss = math.inf #初始值无穷大
     step = 0 #记录当前训练多少伦次数据
@@ -117,7 +117,7 @@ def trainer(train_loader,valid_loader,config, device,model):
         #进度条
         train_pbar = tqdm(train_loader,position  = 0 ,leave = True)
         for x,y in train_pbar:
-            optimizer.zero.grad()
+            optimizer.zero_grad()
             x,y = x.to(device),y.to(device)
             pred = model(x)
             loss=  criterion(pred,y)
@@ -143,7 +143,7 @@ def trainer(train_loader,valid_loader,config, device,model):
             with torch.no_grad():
                 pre =  model(x)
                 loss = criterion(pre,y)
-            loss_record_valid.append(loss.iterm())
+            loss_record_valid.append(loss.item())
         mean_valid_loss = sum(loss_record_valid)/len(loss_record_valid)
         print(f'Epoch [{epoch+1} / {n_epochs}]: Train loss :{mean_train_loss :.4f},Valid loss {mean_valid_loss:.4f}')
         #可视化
@@ -160,14 +160,36 @@ def trainer(train_loader,valid_loader,config, device,model):
             print('\n MOdel is not improving') 
             return
 
+#预测
+def predict(test_loader, model ,device):
+    model.eval()
+    preds  = []
+    for x in tqdm(test_loader):
+        x = x.to(device)
+        with torch.no_grad():
+            pred = model(x)
+            preds.append(pred.detach().cpu())
+    preds = torch.cat(preds,dim= 0).numpy()
+    return preds
+
+
+
+def save_pre(preds,file):
+    with open(file,'w') as fp:
+        writer = csv.writer(fp)
+        writer.writerow(['id','tested_positive'])
+        for i ,p in enumerate(preds):
+            writer.writerow([i,p])
+        
+
 if __name__ == "__main__":
-    same_seed(config['seed'])
+    same_seed = (config['seed'])
     #读数据
-    train_data = pd.read_csv('./covid.train.csv').values
-    test_data  = pd.read_csv('./covid.test.csv').values
+    train_data = pd.read_csv('/home/panjunzhong/MLlearn/p1/covid.train.csv').values
+    test_data  = pd.read_csv('/home/panjunzhong/MLlearn/p1/covid.test.csv').values
 
     #划分数据集
-    train_data,valid_data = random_split(train_data,config['valid_ratio'],same_seed)
+    train_data,valid_data = train_vail_split(train_data,config['valid_ratio'],same_seed)
     print(f'train_data size{train_data.shape}, valid_data size {valid_data.shape}, test_daata size {test_data.shape} ')
     #选择特征
     x_train,x_valid,x_test,y_train,y_valid = select_feet(train_data,
@@ -182,11 +204,20 @@ if __name__ == "__main__":
     #Dataloader
     train_loader = DataLoader(train_dataset,batch_size=config['batch_size'],shuffle = True,pin_memory = True)
     valid_loader = DataLoader(valid_dataset,batch_size=config['batch_size'],shuffle = True,pin_memory = True)
-    test_lodaer  = DataLoader(test_dataset,batch_size=config['batch_size'],shuffle = False,pin_memory = True)
+    test_loader  = DataLoader(test_dataset,batch_size=config['batch_size'],shuffle = False,pin_memory = True)
 
     #训练
-    model = My_Module(input_dim=train_data.shape[1]).to(device)
-    trainer(train_loader , valid_loader, test_lodaer,config,device)
+    model = My_Module(input_dim=train_data.shape[1] - 1).to(device)
+    trainer(train_loader , valid_loader, config,device,model)
+    
+    
+    preds = predict(test_loader,model,device)
+    save_pre(preds,file = '/home/panjunzhong/MLlearn/p1/models/pred.csv' )
+    
+    
+    
+  
+    
 
 
              
