@@ -90,7 +90,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f'Using device: {device}')
 #字典
 config = {
-    'seed':1122408,
+    'seed':5201314,
     'selsec_all': True,
     'valid_ratio':0.2,
     'n_epochs' : 3000,
